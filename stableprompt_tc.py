@@ -112,6 +112,7 @@ def main():
         batch_size=args.prompt_per_example,
         mini_batch_size=args.prompt_per_example,
         log_with="wandb",
+        # seed=args.seed, # luiza: this was not defined by the original code
     )
     lora_config = LoraConfig(
         r=16, lora_alpha=32, lora_dropout=0.05, bias="none", task_type="CAUSAL_LM"
@@ -180,7 +181,6 @@ def main():
             examples = utils.got_example(
                 validation_dataset, verbalizer, shot=args.num_example
             )
-            print(0)
             with torch.no_grad():
                 query_text = [
                     {"role": "user", "content": args.meta_prompt + "\n" + examples},
@@ -191,14 +191,12 @@ def main():
                     .view(-1)
                     .to(device)
                 )
-                print(1)
                 response_tensors = ppo_trainer.generate(
                     query_encoded,
                     **generation_kwargs,
                     return_prompt=False,
                     num_return_sequences=args.prompt_per_example,
                 )
-                print(2)
 
                 used_prompt = [
                     agent_tokenizer.decode(r.squeeze(), skip_special_tokens=True)
@@ -213,7 +211,6 @@ def main():
             losses = []
             new_dict = {"text": inputs, "label": labels}
             new_ds = Dataset.from_dict(new_dict)
-            print(3)
             with torch.no_grad():
                 accuracys, softmax_diff = utils.evaluation_sd(
                     used_prompt,
@@ -243,7 +240,6 @@ def main():
                 queue.add(rewards[i].item(), used_prompt[i], ep)
             bs = len(np_rewards)
             # print([query_encoded.view(-1) for i in range(bs)],response_tensors,[torch.tensor(reward) for reward in rewards])
-            print(4)
             stats = ppo_trainer.step(
                 [query_encoded.view(-1) for i in range(bs)],
                 [response for response in response_tensors],
@@ -262,7 +258,6 @@ def main():
 
         # reference model update
         if ep % args.update_term == 0 and ep != 0:
-            print(5)
             response_tensors, ref_response_tensors = ppo_trainer.generate(
                 query_encoded.view(-1),
                 **generation_kwargs,
@@ -318,7 +313,6 @@ def main():
                     "ref_valid_acc": mean_ref_acc,
                 }
             )
-            print(6)
 
     print("Final test Start")
     prompt_queue = queue.get_top_texts()
