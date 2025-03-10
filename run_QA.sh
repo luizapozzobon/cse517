@@ -62,5 +62,5 @@ datasets=(
 # Loop through each main dataset and run the script
 for dataset in "${datasets[@]}"
 do
-    python stableprompt_qa.py --dataset $dataset --epoch 30 --update_term 5
+    python stableprompt_qa.py --dataset $dataset --epoch 30 --update_term 5 --cache_dir ./cache
 done
