@@ -615,7 +615,7 @@ def main():
         log_completions=True,
         log_on_each_node=False,
         use_vllm=True,
-        vllm_device="cuda:3",
+        vllm_device="cuda:0",
         vllm_gpu_memory_utilization=0.3,
         vllm_dtype=torch.bfloat16,
         vllm_max_model_len=1024,

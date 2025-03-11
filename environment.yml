@@ -1,0 +1,22 @@
+name: multilora
+channels:
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - cuda-toolkit
+  - ccache
+  - cmake
+  - gcc=11
+  - git
+  - gxx=11
+  - make
+  - ninja
+  - mamba
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1
+  - ipykernel
+prefix: /gscratch/ark/graf/miniconda3/envs/multilora
