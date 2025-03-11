@@ -15,8 +15,12 @@ from peft import LoraConfig
 from datasets import Dataset
 def parser_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--target_model',type=str,default='google/gemma-1.1-7b-it')
-    parser.add_argument('--agent_model',type=str,default='google/gemma-1.1-7b-it')
+    parser.add_argument('--target_model',type=str,default="meta-llama/Llama-3.2-3B-Instruct")#'google/gemma-1.1-7b-it')
+    parser.add_argument(
+        "--agent_model",
+        type=str,
+        default="meta-llama/Llama-3.2-3B-Instruct")# google/gemma-1.1-7b-it",
+    )
     parser.add_argument('--task',type=str,default='classification')
     parser.add_argument('--dataset',type=str,default='sst2')
     parser.add_argument(
@@ -30,7 +34,7 @@ def parser_args():
     parser.add_argument('--max_prompt_length',type=int,default=100)
     parser.add_argument('--train_data_per_labels',type=int,default=16)
     parser.add_argument('--num_example',type=int,default=5)
-    parser.add_argument('--epochs',type=int,default=10)
+    parser.add_argument('--epochs',type=int,default=100)
     parser.add_argument('--meta_prompt',type=str,
                         default = '''I gave a friend an instruction and five inputs. 
                         The friend read the instruction and wrote an output for every one of the inputs.
@@ -119,7 +123,11 @@ def main():
         cache_dir = args.cache_dir
     )
     agent_tokenizer.pad_token = agent_tokenizer.eos_token
-    ppo_trainer = PPOTrainer(config,agent_model,ref_model,agent_tokenizer)
+    ppo_trainer = PPOTrainer(
+        config,
+        agent_model,
+        ref_model,
+        agent_tokenizer)
     
     #load target model
     target_tokenizer = AutoTokenizer.from_pretrained(args.target_model,cache_dir = args.cache_dir)
@@ -291,9 +299,7 @@ def main():
         'final_acc' : max_new_acc,
         'final_mean_acc' : np.mean(np.array(new_acc))
     })
-    
-            
+
+
 if __name__ == '__main__':
     main()
-                
-                    
