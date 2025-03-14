@@ -404,9 +404,9 @@ def load_qnli():
 def load_mnli():
     from datasets import load_dataset
 
-    train_sentences = load_dataset("glue", "mnli", split="train")
+    train_sentences = load_dataset("glue", "mnli", split="train",trust_remote_code=True)
     train_labels = train_sentences["label"]
-    test_sentences = load_dataset("glue", "mnli", split="validation_matched")
+    test_sentences = load_dataset("glue", "mnli", split="validation_matched",trust_remote_code=True)
     test_labels = test_sentences["label"]
     train_sentences = [sentence for sentence in train_sentences]
     test_sentences = [sentence for sentence in test_sentences]
@@ -487,7 +487,7 @@ def load_rte():
 
     # file_dict = {'train': 'data/k-shot/RTE/16-13/train.tsv'}
     # train_sentences = load_dataset('csv', data_files=file_dict, split='train', delimiter='\t')
-    train_sentences = load_dataset("super_glue", "rte", split="train")
+    train_sentences = load_dataset("super_glue", "rte", split="train",trust_remote_code=True)
     train_labels = train_sentences["label"]
     unique = {label: idx for idx, label in enumerate(set(train_labels))}
     train_labels = [unique[label] for label in train_sentences["label"]]

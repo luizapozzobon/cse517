@@ -67,11 +67,11 @@ def parser_args():
     parser.add_argument(
         "--cache_dir", type=str, default="gscratch/ark/graf/grpo_cache/llm/"
     )
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--max_prompt_length", type=int, default=100)
-    parser.add_argument("--train_data_per_labels", type=int, default=16)
+    parser.add_argument("--train_data_per_labels", type=int, default=128)
     parser.add_argument("--num_example", type=int, default=5)
-    parser.add_argument("--epochs", type=int, default=256)
+    parser.add_argument("--epochs", type=int, default=32)
     parser.add_argument(
         "--meta_prompt",
         type=str,
@@ -83,9 +83,12 @@ def parser_args():
     parser.add_argument("--prompt_per_example", type=int, default=4)
     parser.add_argument("--update_term", type=int, default=15)
     parser.add_argument("--update_threshold", type=float, default=0.05)
-    parser.add_argument("--num_test_example", type=int, default=20)
-    parser.add_argument("--num_generations", type=int, default=4)
+
+    parser.add_argument("--num_generations", type=int, default=128)
     parser.add_argument("--local_rank", type=int, default=0)
+    parser.add_argument("--world_size", type=int, default=8)
+    parser.add_argument("--beta", type=float, default=1e-5)
+    parser.add_argument("--lr", type=float, default=1e-6)
 
     args = parser.parse_args()
     return args
@@ -213,45 +216,6 @@ def unwrap_model_for_generation(
         yield unwrapped_model
 
 
-def _move_model_to_vllm(trainer, model):
-    with unwrap_model_for_generation(
-        model,
-        trainer.accelerator,
-        gather_deepspeed3_params=trainer.args.ds3_gather_for_generation,
-    ) as unwrapped_model:
-        if is_compiled_module(unwrapped_model):
-            unwrapped_model = unwrapped_model._orig_mod
-        if is_peft_model(unwrapped_model):
-            unwrapped_model.merge_adapter()
-            state_dict = unwrapped_model.state_dict()
-            # Remove base_model and base_layer prefixes
-            state_dict = {
-                k.removeprefix("base_model.model.").replace(".base_layer", ""): v
-                for k, v in state_dict.items()
-            }
-            # Remove values with adapter prefix (example: "_lora")
-            state_dict = {
-                k: v for k, v in state_dict.items() if unwrapped_model.prefix not in k
-            }
-            # When module to save, remove its prefix and discard the original module
-            state_dict = {
-                k.replace("modules_to_save.default.", ""): v
-                for k, v in state_dict.items()
-                if "original_module" not in k
-            }
-        else:
-            state_dict = unwrapped_model.state_dict()
-        if trainer.accelerator.is_main_process:
-            llm_model = (
-                trainer.llm.llm_engine.model_executor.driver_worker.model_runner.model
-            )
-            llm_model.load_weights(state_dict.items())
-        # Unmerge the adapter to restore the model to its original state.
-        # This must be done after loading weights to ensure they correspond to the merged state.
-        if is_peft_model(unwrapped_model):
-            unwrapped_model.unmerge_adapter()
-
-
 class PromptDataset(Dataset):
     def __init__(
         self,
@@ -304,6 +268,36 @@ class PromptDataset(Dataset):
         return [self.prompts[idx] for idx in indices]
 
 
+def shard_list(data_list, num_shards, shard_index):
+    """
+    Manually shard a list into num_shards parts and return the shard at shard_index.
+
+    Args:
+        data_list: The list to be sharded
+        num_shards: Total number of shards
+        shard_index: Index of the shard to return (0-indexed)
+
+    Returns:
+        A subset of the original list corresponding to the requested shard
+    """
+    # Calculate shard size and starting/ending indices
+    list_length = len(data_list)
+    items_per_shard = list_length // num_shards
+    remainder = list_length % num_shards
+
+    # Distribute remainder items among the first 'remainder' shards
+    start_idx = 0
+    for i in range(shard_index):
+        shard_size = items_per_shard + (1 if i < remainder else 0)
+        start_idx += shard_size
+
+    # Calculate end index for this shard
+    shard_size = items_per_shard + (1 if shard_index < remainder else 0)
+    end_idx = start_idx + shard_size
+
+    return data_list[start_idx:end_idx]
+
+
 def main():
 
     args = parser_args()
@@ -313,13 +307,9 @@ def main():
         wandb.init(
             project="algprompt_" + args.task + "_" + args.dataset,
             config=args,
-            name=args.task
-            + "_"
-            + args.dataset
-            + "_"
-            + args.agent_model
-            + "_"
-            + args.target_model,
+            name=args.task + "_" + args.dataset + "_" + args.agent_model,
+            # + "_"
+            # + args.target_model,
             # mode="disabled",
         )
 
@@ -464,6 +454,7 @@ def main():
             "text": [s["text"] for s in subset],
             "label": [s["label"] for s in subset],
         }
+
         new_ds = Dataset.from_dict(new_dict)
 
         # _move_model_to_vllm(trainer, target_model)
@@ -477,7 +468,7 @@ def main():
                 target_tokenizer,
                 device,
                 verbalizer.values(),
-                batch_size=4,
+                batch_size=16,
             )
 
             if soft:
@@ -498,11 +489,22 @@ def main():
         return rewards
 
     def get_last_generation():
-        df_path = wandb.run.summary["completions"]["path"]
-        with open("wandb/latest-run/files/" + df_path, "r") as f:
-            df = json.load(f)
 
-        df = dict(zip(df["columns"], df["data"][0]))
+        if args.local_rank == 0:
+            df_path = wandb.run.summary["completions"]["path"]
+            with open("wandb/latest-run/files/" + df_path, "r") as f:
+                df = json.load(f)
+
+                df = dict(zip(df["columns"], df["data"][0]))
+
+                shared_object = [df]
+        else:
+            shared_object = [None]
+
+        shared_object = broadcast_object_list(shared_object, from_process=0)
+
+        # print("shared_object", shared_object)
+        df = shared_object[0]
 
         return df
 
@@ -515,7 +517,7 @@ def main():
             prompts,
             completions,
             task_dataset=dataset,
-            batch_size=len(dataset),
+            batch_size=args.num_generations,
             soft=False,
             **kwargs,
         )
@@ -542,7 +544,11 @@ def main():
                 compute_metrics_fn: Optional custom metrics function
                 eval_batch_size: Batch size to use during evaluation
             """
-            self.validation_dataset = validation_dataset
+            self.validation_dataset = shard_list(
+                validation_dataset,
+                num_shards=args.world_size,
+                shard_index=args.local_rank,
+            )
             self.best_reward = 0.0
             self.eval_steps = eval_steps
             self.best_completion = None
@@ -559,21 +565,41 @@ def main():
             if (
                 state.global_step % self.eval_steps == 0
                 and len(state.log_history) > 0
-                and args.local_rank == 0
+                # and args.local_rank == 0
             ):
                 print(f"Step {state.global_step} - Logging validation metrics...")
 
                 df = get_last_generation()
 
-                metrics = perform_eval(
+                ## break the dataset according to local rank
+
+                acc_value = perform_eval(
                     df["prompt"], df["completion"], self.validation_dataset, **kwargs
-                )
+                )["acc"]
 
-                metrics = {"val_acc": metrics["acc"]}
+                acc_tensor = torch.tensor([acc_value], device=f"cuda:{args.local_rank}")
 
-                state.log_history[-1]["val_acc"] = metrics["val_acc"]
+                # Gather from all processes
+                all_acc_tensors = gather(acc_tensor)
 
-                wandb.log(metrics)
+                # Process the gathered metrics on the main process
+                if args.local_rank == 0:
+                    # Extract accuracy values from all processes
+
+                    mean_accuracy = torch.mean(all_acc_tensors).item()
+
+                    # Create the final metrics dictionary
+                    final_metrics = {"val_acc": mean_accuracy}
+
+                    # Update state and log to wandb
+                    state.log_history[-1]["val_acc"] = mean_accuracy
+                    wandb.log(final_metrics)
+                else:
+                    final_metrics = {"val_acc": None}
+
+                # Broadcast the final metrics to all processes so they have the same value
+                final_metrics = broadcast_object_list([final_metrics], from_process=0)
+                metrics = final_metrics[0]
 
                 # Track best accuracy
                 if metrics.get("val_acc", 0) > self.best_reward:
@@ -589,19 +615,19 @@ def main():
     validation_callback = ValidationAccuracyCallback(validation_dataset)
 
     training_args = GRPOConfig(
-        output_dir=f"{args.agent_model}-GRPO",
-        learning_rate=5e-6,
+        output_dir=f"{args.agent_model}-GRPO-{args.lr}-{args.beta}",
+        learning_rate=args.lr,
         bf16=True,
         bf16_full_eval=True,
         adam_beta1=0.9,
         adam_beta2=0.99,
         weight_decay=1e-6,
         warmup_steps=2,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=16,
+        per_device_train_batch_size=16,
+        gradient_accumulation_steps=1,
         # train_batch_size=16,
         gradient_checkpointing=True,
-        beta=1e-5,
+        beta=args.beta,  # 1e-5
         lr_scheduler_type="cosine_with_restarts",
         logging_steps=1,
         num_generations=args.num_generations,  # 4,
@@ -616,7 +642,7 @@ def main():
         log_on_each_node=False,
         use_vllm=True,
         vllm_device="cuda:0",
-        vllm_gpu_memory_utilization=0.3,
+        vllm_gpu_memory_utilization=0.25,
         vllm_dtype=torch.bfloat16,
         vllm_max_model_len=1024,
         # eval_steps=1,
@@ -639,15 +665,35 @@ def main():
 
     trainer.train()
 
+    test_shard = shard_list(
+        test_dataset,
+        num_shards=args.world_size,
+        shard_index=args.local_rank,
+    )
+
+    acc_value = perform_eval(
+        validation_callback.best_prompt,
+        validation_callback.best_completion,
+        test_shard,
+    )["acc"]
+
+    acc_tensor = torch.tensor([acc_value], device=f"cuda:{args.local_rank}")
+
+    # Gather from all processes
+    all_acc_tensors = gather(acc_tensor)
+
     if args.local_rank == 0:
+        # Extract accuracy values from all processes
 
-        metrics = perform_eval(
-            validation_callback.best_prompt,
-            validation_callback.best_completion,
-            test_dataset,
-        )
+        mean_accuracy = torch.mean(all_acc_tensors).item()
 
-        print("Final test accuracy:", metrics["acc"])
+        # Create the final metrics dictionary
+        final_metrics = {"test_acc": mean_accuracy}
+
+        # Update state and log to wandb
+        wandb.log(final_metrics)
+
+        print("Final test accuracy:", final_metrics)
 
 
 if __name__ == "__main__":

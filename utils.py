@@ -1142,8 +1142,8 @@ def evaluation_sdX(
 
     # Compute final metrics for each prompt
     for i in range(len(prompts)):
-        accuracys[i] = torch.Tensor([corrects[i] / totals[i]])
-        sds[i] = torch.Tensor([sds[i] / totals[i]])
+        accuracys[i] = torch.Tensor([corrects[i] / max(totals[i],1)])
+        sds[i] = torch.Tensor([sds[i] / max(totals[i],1)])
 
     return accuracys, sds
 
