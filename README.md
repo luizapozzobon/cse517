@@ -50,7 +50,4 @@ sbatch run_QA.slurm
 ### Additional/Novel Experiment
 
 To run our proposed RL++ method, you need to setup another environment, as GRPO required newer versions of the libraries.
-
-```bash
-# todo
-```
+Instructions and code can be found in the [rlplus](https://github.com/luizapozzobon/cse517/tree/rlplus) branch of this repository.
