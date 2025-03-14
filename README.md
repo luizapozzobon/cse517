@@ -17,7 +17,7 @@ However, libraries were not versioned and that does not work anymore. So we cons
 
 ```bash
 conda create --name stableprompt python=3.10.12
-pip install requirements_repr.txt
+pip install requirements.txt
 ```
 
 ## Running RL++ experiments
