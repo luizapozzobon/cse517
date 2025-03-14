@@ -23,6 +23,6 @@ pip install requirements_repr.txt
 ## Running RL++ experiments
 
 ```bash
-./run_experimentalt.sh
+./run_experimental.sh
 
 ```
