@@ -22,7 +22,7 @@ pip install requirements_repr.txt
 
 ## Running experiments
 
-The original authors have provided handy bash scripts that execute each task's code. We build slurm files on top of those to execute them in a multi-gpu setting.
+The original authors have provided handy bash scripts that execute each task's code. We build slurm files on top of those to execute them in a multi-gpu setting. Besides that, all other components were already treated by the original code: data is downloaded inside the scripts, preprocesing, training, evaluation and access to pretrained models are also handled by the original scripts.
 
 ### Experiment 4.1: Few-shot Text Classification
 ```bash
@@ -47,7 +47,7 @@ sbatch run_II.slurm
 sbatch run_QA.slurm
 ```
 
-### Additional Experiment
+### Additional/Novel Experiment
 
 To run our proposed RL++ method, you need to setup another environment, as GRPO required newer versions of the libraries.
 
